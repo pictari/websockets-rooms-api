@@ -4,7 +4,32 @@ import { v4 } from 'uuid';
 
 const pathServer: Map<string, WebSocketServer> = new Map();
 
-const server = createServer();
+// https://medium.com/@libinthomas33/building-a-crud-api-server-in-node-js-using-http-module-9fac57e2f47d
+const server = createServer((req, res) =>
+{
+    if(req.method === 'UPGRADE') {
+        return;
+    }
+
+    // do additional stuff when we bring in authentication and admins
+    /*
+    let body = "";
+    let resultingJson : JSON;
+
+    req.on("data", (chunk) => {
+        body += chunk;
+    })
+
+    req.on("end", () => {
+        resultingJson = JSON.parse(body);
+    }) */
+
+    if(req.method === 'POST') {
+        let newPath = raiseNewWSServer();
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end({"newServerPath": newPath});
+    }
+});
 
 server.on('upgrade', function upgrade(request, socket, head) {
     // change base url when we get a domain
@@ -28,6 +53,9 @@ server.on('upgrade', function upgrade(request, socket, head) {
     }
 })
 
+server.listen(8080);
+
+
 function raiseNewWSServer() {
     // is it excessive to use UUIDs for server names
     // (yes)
@@ -46,6 +74,5 @@ function raiseNewWSServer() {
     })
 
     pathServer.set(name, wss);
+    return name;
 }
-
-server.listen(8080);
