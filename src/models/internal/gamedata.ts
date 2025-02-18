@@ -1,3 +1,5 @@
+import { Player } from "./player";
+
 export class Gamedata {
     dynamoIdentifier?:string;
     name:string;
