@@ -7,33 +7,33 @@ import { WsCommand } from './models/internal/wscommand';
 
 const pathServer: Map<string, WebSocketServer> = new Map();
 const pathSettings: Map<string, Gamedata> = new Map();
-const client : DynamoDBClient = new DynamoDBClient({});
+const client: DynamoDBClient = new DynamoDBClient({});
 
 // https://medium.com/@libinthomas33/building-a-crud-api-server-in-node-js-using-http-module-9fac57e2f47d
-const server = createServer((req, res) =>
-{
+const server = createServer((req, res) => {
     let body = "";
-    let resultingJson : any;
+    let resultingJson: any;
+    // try to manually read data
     try {
         req.on("data", (chunk) => {
             body += chunk;
-        })
-    
+        });
+
         req.on("end", () => {
             resultingJson = JSON.parse(body);
-        })    
-    } catch(error) {
+        });
+    } catch (error) {
         res.writeHead(400, { "content-type": "text/html" });
         res.end("Error parsing your request body. This server only accepts JSON.\n\n" + error);
         return;
     }
 
     // make the server with initial gamedata
-    if(req.method === 'POST') {
-        let gamedata : Gamedata;
+    if (req.method === 'POST') {
+        let gamedata: Gamedata;
         try {
             gamedata = createGamedata(resultingJson);
-        } catch(error) {
+        } catch (error) {
             res.writeHead(400, { "content-type": "text/html" });
             res.end("The request body contains malformed JSON.\n\n" + error);
             return;
@@ -41,30 +41,32 @@ const server = createServer((req, res) =>
         let newPath = raiseNewWSServer(gamedata);
         updateDynamoTable(newPath);
         res.writeHead(201, { "content-type": "application/json" });
-        res.end({"newServerPath": newPath});
+        res.end({ "newServerPath": newPath });
     }
 });
 
 server.on('upgrade', function upgrade(request, socket, head) {
     // change base url when we get a domain
     let pathName = new URL(request.url as string, 'ws://pictari.app');
-    let found : boolean = false;
+    let found: boolean = false;
 
     // cycle through all the active "sub"servers
-    for(let key in pathServer.keys) {
-        if(pathName.toString() === '/' + key) {
-            if(pathSettings.get(key)?.status == Status.waiting) {
+    for (let key in pathServer.keys) {
+        if (pathName.toString() === '/' + key) {
+            if (pathSettings.get(key)?.status == Status.waiting) {
                 found = true;
                 let wss = pathServer.get(key);
                 wss?.handleUpgrade(request, socket, head, function done(ws) {
-                    wss.emit('connection', ws, request);
+                    if (wss != undefined) {
+                        wss.emit('connection', ws, request);
+                    }
                 })
                 break;
             }
         }
     }
 
-    if(!found) {
+    if (!found) {
         socket.destroy();
     }
 });
@@ -78,7 +80,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
     // fun fact: this is the same UUID type that minecraft uses
     let upgradePath = v4();
 
-    let wss = new WebSocketServer({noServer: true});
+    let wss = new WebSocketServer({ noServer: true });
 
     // set up behavior
     wss.on('connection', function connection(ws) {
@@ -87,20 +89,21 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
         ws.on('message', function message(data) {
             try {
                 let json = JSON.parse(data.toString());
-                switch(json.command) {
-                    case(WsCommand.chat):
+                switch (json.command) {
+                    case (WsCommand.chat):
                         ws.send(`{\"response\":0,\"uuid\":\"${json.uuid}\",\"message\":\"${json.message}\"}`);
                         break;
-                    case(WsCommand.applySettings):
-                        let outgoingData = pathSettings.get(upgradePath);
-                        if(outgoingData != undefined) {
-                            ws.send(settingsInformation(outgoingData));
+                    case (WsCommand.applySettings):
+                        let currentData = pathSettings.get(upgradePath);
+                        if (currentData != undefined) {
+                            updateGamedata(json, currentData);
+                            ws.send(settingsInformation(currentData));
                         }
                         break;
-                    case(WsCommand.start):
+                    case (WsCommand.start):
                         //TODO: raise a gameserver here
                         break;
-                    case(WsCommand.disband):
+                    case (WsCommand.disband):
                         ws.send(`{\"response\":3}`);
                         ws.close(1000, `Owner of the room has closed this session.`);
                         cleanup(upgradePath);
@@ -108,7 +111,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                     default:
                         break;
                 }
-            } catch(error) {
+            } catch (error) {
                 // replace this once we finish debugging
                 ws.send("Malformed data: " + error);
             }
@@ -125,24 +128,24 @@ async function updateDynamoTable(key: string) {
     let input;
 
     // the entity is shaped differently depending on whether the room is public or private
-    if(settings?.isPrivate && settings.joinKey != undefined) {
+    if (settings?.isPrivate && settings.joinKey != undefined) {
         input = {
-            "TableName":"sample-data",
+            "TableName": "sample-data",
             "Item": {
                 "RoomId": {
-                    "S" : key
+                    "S": key
                 },
                 "RoomName": {
-                    "S" : settings.name
+                    "S": settings.name
                 },
                 "CurrentCount": {
-                    "N" : String(settings.players.size)
+                    "N": String(settings.players.size)
                 },
-                "MaxPlayers" : {
-                    "N" : String(settings.maxPlayers)
+                "MaxPlayers": {
+                    "N": String(settings.maxPlayers)
                 },
                 "Host": {
-                    "S" : settings.ownerUuid
+                    "S": settings.ownerUuid
                 },
                 "Private": {
                     "BOOL": true
@@ -159,24 +162,24 @@ async function updateDynamoTable(key: string) {
             }
         }
         await client.send(new PutItemCommand(input));
-    } else if(settings != undefined) {
+    } else if (settings != undefined) {
         input = {
-            "TableName":"sample-data",
+            "TableName": "sample-data",
             "Item": {
                 "RoomId": {
-                    "S" : key
+                    "S": key
                 },
                 "RoomName": {
-                    "S" : settings.name
+                    "S": settings.name
                 },
                 "CurrentCount": {
-                    "N" : String(settings.players.size)
+                    "N": String(settings.players.size)
                 },
-                "MaxPlayers" : {
-                    "N" : String(settings.maxPlayers)
+                "MaxPlayers": {
+                    "N": String(settings.maxPlayers)
                 },
                 "Host": {
-                    "S" : settings.ownerUuid
+                    "S": settings.ownerUuid
                 },
                 "Private": {
                     "BOOL": false
@@ -193,15 +196,15 @@ async function updateDynamoTable(key: string) {
     }
 }
 
-async function cleanup(key:string) {
+async function cleanup(key: string) {
     pathServer.delete(key);
     pathSettings.delete(key);
 
     let input = {
-        "TableName":"sample-data",
-        "Key":{
-            "RoomId":{
-                "S":key
+        "TableName": "sample-data",
+        "Key": {
+            "RoomId": {
+                "S": key
             }
         }
     }
@@ -210,22 +213,47 @@ async function cleanup(key:string) {
 }
 
 // JSON parsing creates an equivalent of an anonymous class, so the incoming type can't be anything other than any
-function createGamedata(json:any):Gamedata {
-    let name : string = json.name;
-    let ownerUuid : string = json.ownerUuid;
-    let maxPlayers : number = json.maxPlayers;
-    let isPrivate : boolean = json.isPrivate;
-    let joinKey : string;
+function createGamedata(json: any): Gamedata {
+    let name: string = json.name;
+    let ownerUuid: string = json.ownerUuid;
+    let maxPlayers: number = json.maxPlayers;
+    let isPrivate: boolean = json.isPrivate;
+    let joinKey: string;
     let gamemode = json.gamemode;
 
     let gamedata = new Gamedata(name, ownerUuid, maxPlayers, isPrivate, gamemode);
-    if(isPrivate) {
+    if (isPrivate) {
         joinKey = json.joinKey;
         gamedata.joinKey = joinKey;
     }
     return gamedata;
 }
 
-function settingsInformation(gamedata:Gamedata):string {
+// similar function to above, except it uses an extant gamedata and can be partial
+function updateGamedata(json: any, gamedata: Gamedata) {
+    let name: string = json.name;
+    if (name != undefined && name != null) {
+        gamedata.name = name;
+    }
+
+    let maxPlayers: number = json.maxPlayers;
+    if (maxPlayers != undefined && maxPlayers != null) {
+        gamedata.maxPlayers = maxPlayers;
+    }
+
+    let isPrivate: boolean = json.isPrivate;
+    if (isPrivate != undefined && isPrivate != null) {
+        gamedata.isPrivate = isPrivate;
+    }
+
+    if (gamedata.isPrivate) {
+        let joinKey: string = json.joinKey;
+        if (joinKey != undefined && joinKey != null) {
+            gamedata.joinKey = joinKey;
+        }
+    }
+}
+
+function settingsInformation(gamedata: Gamedata): string {
     return `{"response":1,"name":"${gamedata.name}","maxPlayers":"${gamedata.maxPlayers}","isPrivate":"${gamedata.isPrivate}","joinKey":"${gamedata.joinKey}","gamemode":0,"status":"0"}`;
 };
