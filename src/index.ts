@@ -91,21 +91,35 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                 let json = JSON.parse(data.toString());
                 switch (json.command) {
                     case (WsCommand.chat):
-                        ws.send(`{\"response\":0,\"uuid\":\"${json.uuid}\",\"message\":\"${json.message}\"}`);
+                        wss.clients.forEach(function each(client) {
+                            if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                client.send(`{\"response\":0,\"uuid\":\"${json.uuid}\",\"message\":\"${json.message}\"}`);
+                            }
+                        });
                         break;
                     case (WsCommand.applySettings):
                         let currentData = pathSettings.get(upgradePath);
                         if (currentData != undefined) {
                             updateGamedata(json, currentData);
                             updateDynamoTable(upgradePath);
-                            ws.send(settingsInformation(currentData));
+                            wss.clients.forEach(function each(client) {
+                                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                    if (currentData != undefined) {
+                                        client.send(settingsInformation(currentData));
+                                    }
+                                }
+                            });
                         }
                         break;
                     case (WsCommand.start):
                         //TODO: raise a gameserver here
                         break;
                     case (WsCommand.disband):
-                        ws.send(`{\"response\":3}`);
+                        wss.clients.forEach(function each(client) {
+                            if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                client.send(`{\"response\":3}`);
+                            }
+                        });
                         ws.close(1000, `Owner of the room has closed this session.`);
                         cleanup(upgradePath);
                         break;
@@ -114,7 +128,11 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                 }
             } catch (error) {
                 // replace this once we finish debugging
-                ws.send("Malformed data: " + error);
+                wss.clients.forEach(function each(client) {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        client.send("Malformed data: " + error);
+                    }
+                });
             }
         });
     });
