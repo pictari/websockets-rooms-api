@@ -83,7 +83,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
     let wss = new WebSocketServer({ noServer: true });
 
     // set up behavior
-    wss.on('connection', function connection(ws) {
+    wss.on('connection', function connection(ws, req) {
         ws.on('error', console.error);
 
         ws.on('message', function message(data) {
@@ -97,6 +97,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         let currentData = pathSettings.get(upgradePath);
                         if (currentData != undefined) {
                             updateGamedata(json, currentData);
+                            updateDynamoTable(upgradePath);
                             ws.send(settingsInformation(currentData));
                         }
                         break;
@@ -116,7 +117,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                 ws.send("Malformed data: " + error);
             }
         });
-    })
+    });
 
     pathServer.set(upgradePath, wss);
     pathSettings.set(upgradePath, initialGamedata);
