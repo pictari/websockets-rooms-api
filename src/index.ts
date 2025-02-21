@@ -11,6 +11,18 @@ const client: DynamoDBClient = new DynamoDBClient({});
 
 // https://medium.com/@libinthomas33/building-a-crud-api-server-in-node-js-using-http-module-9fac57e2f47d
 const server = createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Allow all origins, or set a specific domain (e.g., 'https://example.com')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'); // Allow specific methods
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); // Allow specific headers
+    res.setHeader('Access-Control-Allow-Credentials', 'true'); // Allow credentials (cookies, etc.)
+
+    if(req.method === 'OPTIONS') {
+                
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
     let body = "";
     let resultingJson: any;
     // try to manually read data
@@ -20,39 +32,40 @@ const server = createServer((req, res) => {
         });
 
         req.on("end", () => {
-            resultingJson = JSON.parse(body);
+            resultingJson = JSON.parse(body.toString());
+            
+            // make the server with initial gamedata
+            if (req.method === 'POST') {
+                let gamedata: Gamedata;
+                try {
+                    gamedata = createGamedata(resultingJson);
+                } catch (error) {
+                    res.writeHead(400, { "content-type": "text/html" });
+                    res.end("The request body contains malformed JSON.\n\n" + error);
+                    return;
+                }
+                let newPath = raiseNewWSServer(gamedata);
+                //updateDynamoTable(newPath);
+                res.writeHead(201, { "content-type": "application/json" });
+                res.end(`{ "newServerPath": \"${newPath}\" }`);
+            }       
         });
     } catch (error) {
         res.writeHead(400, { "content-type": "text/html" });
         res.end("Error parsing your request body. This server only accepts JSON.\n\n" + error);
         return;
     }
-
-    // make the server with initial gamedata
-    if (req.method === 'POST') {
-        let gamedata: Gamedata;
-        try {
-            gamedata = createGamedata(resultingJson);
-        } catch (error) {
-            res.writeHead(400, { "content-type": "text/html" });
-            res.end("The request body contains malformed JSON.\n\n" + error);
-            return;
-        }
-        let newPath = raiseNewWSServer(gamedata);
-        updateDynamoTable(newPath);
-        res.writeHead(201, { "content-type": "application/json" });
-        res.end({ "newServerPath": newPath });
-    }
 });
 
 server.on('upgrade', function upgrade(request, socket, head) {
     // change base url when we get a domain
-    let pathName = new URL(request.url as string, 'ws://pictari.app');
+    let pathName = new URL(request.url as string, 'ws://localhost:8080');
     let found: boolean = false;
 
+    console.log(pathServer.size);
     // cycle through all the active "sub"servers
-    for (let key in pathServer.keys) {
-        if (pathName.toString() === '/' + key) {
+    for (let key of pathServer.keys()) {
+        if (pathName.pathname.toString() === '/' + key) {
             if (pathSettings.get(key)?.status == Status.waiting) {
                 found = true;
                 let wss = pathServer.get(key);
@@ -101,7 +114,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         let currentData = pathSettings.get(upgradePath);
                         if (currentData != undefined) {
                             updateGamedata(json, currentData);
-                            updateDynamoTable(upgradePath);
+                            //updateDynamoTable(upgradePath);
                             wss.clients.forEach(function each(client) {
                                 if (client !== ws && client.readyState === WebSocket.OPEN) {
                                     if (currentData != undefined) {
@@ -118,9 +131,9 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         wss.clients.forEach(function each(client) {
                             if (client !== ws && client.readyState === WebSocket.OPEN) {
                                 client.send(`{\"response\":3}`);
+                                client.close(1000, `Owner of the room has closed this session.`);
                             }
                         });
-                        ws.close(1000, `Owner of the room has closed this session.`);
                         cleanup(upgradePath);
                         break;
                     default:
