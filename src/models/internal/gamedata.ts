@@ -10,7 +10,7 @@ export class Gamedata {
     gamemode:Gamemode;
     status:Status = Status.waiting;
 
-    players:Set<string> = new Set;
+    players:Set<Player> = new Set;
 
     constructor(name: string, ownerUuid: string, maxPlayers: number, isPrivate: boolean, gamemode: Gamemode) {
         this.name = name;

@@ -4,17 +4,22 @@ import { v4 } from 'uuid';
 import { Gamedata, Status } from './models/internal/gamedata';
 import { DeleteItemCommand, DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { WsCommand } from './models/internal/wscommand';
+import { WsGamedata } from './models/internal/wsgamedata';
+import { Player } from './models/internal/player';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
-const pathServer: Map<string, WebSocketServer> = new Map();
-const pathSettings: Map<string, Gamedata> = new Map();
+const pathServer: Map<string, WsGamedata> = new Map();
+// const pathServer: Map<string, WebSocketServer> = new Map();
+// const pathSettings: Map<string, Gamedata> = new Map();
 const client: DynamoDBClient = new DynamoDBClient({});
+const docClient: DynamoDBDocumentClient = DynamoDBDocumentClient.from(client);
 
 // https://medium.com/@libinthomas33/building-a-crud-api-server-in-node-js-using-http-module-9fac57e2f47d
 const server = createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*'); // Allow all origins, or set a specific domain (e.g., 'https://example.com')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'); // Allow specific methods
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); // Allow specific headers
-    res.setHeader('Access-Control-Allow-Credentials', 'true'); // Allow credentials (cookies, etc.)
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Allowed origins
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'); // Allowed HTTP methods
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); // Allowed headers
+    res.setHeader('Access-Control-Allow-Credentials', 'true'); // Allowed credentials
 
     if(req.method === 'OPTIONS') {
                 
@@ -58,17 +63,29 @@ const server = createServer((req, res) => {
 });
 
 server.on('upgrade', function upgrade(request, socket, head) {
+    // the query in this actually just uses UUID for now, until we get proper authorization going
     // change base url when we get a domain
     let pathName = new URL(request.url as string, 'ws://localhost:8080');
     let found: boolean = false;
 
-    console.log(pathServer.size);
+    let query = pathName.searchParams.get("token");
+    if(query == null || query == undefined || query.length == 0) {
+        socket.destroy();
+    }
+
     // cycle through all the active "sub"servers
     for (let key of pathServer.keys()) {
         if (pathName.pathname.toString() === '/' + key) {
-            if (pathSettings.get(key)?.status == Status.waiting) {
+            if (pathServer.get(key)?.gamedata.status == Status.waiting) {
                 found = true;
-                let wss = pathServer.get(key);
+                let wss = pathServer.get(key)?.websockets;
+                let gamedata = pathServer.get(key)?.gamedata;
+
+                // typescript complains if this check doesn't exist even though we already check for a null...
+                if(query != null) {
+                    gamedata?.players.add(new Player(query, 0));
+                }
+
                 wss?.handleUpgrade(request, socket, head, function done(ws) {
                     if (wss != undefined) {
                         wss.emit('connection', ws, request);
@@ -111,7 +128,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         });
                         break;
                     case (WsCommand.applySettings):
-                        let currentData = pathSettings.get(upgradePath);
+                        let currentData = initialGamedata;
                         if (currentData != undefined) {
                             updateGamedata(json, currentData);
                             //updateDynamoTable(upgradePath);
@@ -150,78 +167,49 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
         });
     });
 
-    pathServer.set(upgradePath, wss);
-    pathSettings.set(upgradePath, initialGamedata);
+    pathServer.set(upgradePath, new WsGamedata(initialGamedata, wss));
     return upgradePath;
 }
 
 async function updateDynamoTable(key: string) {
-    let settings = pathSettings.get(key);
-    let input;
+    let settings = pathServer.get(key)?.gamedata;
+    let playersArray: string[] = [];
+
+    if(settings != undefined) {
+        for(let player of settings?.players) {
+            playersArray.push(player.uuid);
+        }
+    }
 
     // the entity is shaped differently depending on whether the room is public or private
     if (settings?.isPrivate && settings.joinKey != undefined) {
-        input = {
-            "TableName": "sample-data",
+        let input = {
+            "TableName": "sample-data-with-sort",
             "Item": {
-                "RoomId": {
-                    "S": key
-                },
-                "RoomName": {
-                    "S": settings.name
-                },
-                "CurrentCount": {
-                    "N": String(settings.players.size)
-                },
-                "MaxPlayers": {
-                    "N": String(settings.maxPlayers)
-                },
-                "Host": {
-                    "S": settings.ownerUuid
-                },
-                "Private": {
-                    "BOOL": true
-                },
-                "PrivateKey": {
-                    "S": settings.joinKey
-                },
-                "Status": {
-                    "N": String(settings.status)
-                },
-                "Players": {
-                    "SS": Array.from(settings.players)
-                }
+                "RoomId": {"S": key},
+                "RoomName": {"S": settings.name},
+                "CurrentCount":{"N": String(settings.players.size)},
+                "MaxPlayers": {"N": String(settings.maxPlayers)},
+                "HostId": { "S": settings.ownerUuid},
+                "Private": {"N": "1"},
+                "JoinKey": {"S": settings.joinKey},
+                "Status": {"N": String(settings.status)},
+                "Players": {"SS": playersArray}
             }
         }
         await client.send(new PutItemCommand(input));
     } else if (settings != undefined) {
-        input = {
-            "TableName": "sample-data",
+        let input = {
+            "TableName": "sample-data-with-sort",
             "Item": {
-                "RoomId": {
-                    "S": key
-                },
-                "RoomName": {
-                    "S": settings.name
-                },
-                "CurrentCount": {
-                    "N": String(settings.players.size)
-                },
-                "MaxPlayers": {
-                    "N": String(settings.maxPlayers)
-                },
-                "Host": {
-                    "S": settings.ownerUuid
-                },
-                "Private": {
-                    "BOOL": false
-                },
-                "Status": {
-                    "N": String(settings.status)
-                },
-                "Players": {
-                    "SS": Array.from(settings.players)
-                }
+                "RoomId": {"S": key},
+                "RoomName": {"S": settings.name},
+                "CurrentCount": {"N": String(settings.players.size)},
+                "MaxPlayers": {"N": String(settings.maxPlayers)},
+                "HostId": {"S": settings.ownerUuid},
+                "Private": {"N": "0"},
+                "Status": {"N": String(settings.status)},
+                "Players": {"SS": playersArray}
             }
         }
         await client.send(new PutItemCommand(input));
@@ -230,10 +218,9 @@ async function updateDynamoTable(key: string) {
 
 async function cleanup(key: string) {
     pathServer.delete(key);
-    pathSettings.delete(key);
 
     let input = {
-        "TableName": "sample-data",
+        "TableName": "sample-data-with-sort",
         "Key": {
             "RoomId": {
                 "S": key
