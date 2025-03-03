@@ -4,5 +4,6 @@ export enum WsCommand {
     start,
     disband,
     join,
-    ready
+    ready,
+    finish
 }

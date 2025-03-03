@@ -18,8 +18,8 @@ const server = createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); // Allowed headers
     res.setHeader('Access-Control-Allow-Credentials', 'true'); // Allowed credentials
 
-    if(req.method === 'OPTIONS') {
-                
+    if (req.method === 'OPTIONS') {
+
         res.writeHead(204);
         res.end();
         return;
@@ -35,16 +35,26 @@ const server = createServer((req, res) => {
 
         req.on("end", () => {
             resultingJson = JSON.parse(body.toString());
-            
+
             // make the server with initial gamedata
             if (req.method === 'POST') {
                 let auth = req.headers.authorization;
                 console.log(auth);
 
-                if(auth == undefined || auth == null) {
+                if (auth == undefined || auth == null) {
+                    res.writeHead(401, { "content-type": "text/html" });
+                    res.end("Missing authorization header. You must be logged in to create a room.");
+                    return;
+                }
+                let token = verifyJWT(auth);
 
+                if (token == null || token == undefined) {
+                    res.writeHead(403, { "content-type": "text/html" });
+                    res.end("Invalid JWT.");
+                    return;
                 }
                 let gamedata: Gamedata;
+
                 try {
                     gamedata = createGamedata(resultingJson);
                 } catch (error) {
@@ -56,7 +66,7 @@ const server = createServer((req, res) => {
                 //updateDynamoTable(newPath);
                 res.writeHead(201, { "content-type": "application/json" });
                 res.end(`{ "newServerPath": \"${newPath}\" }`);
-            }       
+            }
         });
     } catch (error) {
         res.writeHead(400, { "content-type": "text/html" });
@@ -72,19 +82,19 @@ server.on('upgrade', function upgrade(request, socket, head) {
     let found: boolean = false;
 
     let query = pathName.searchParams.get("token");
-    if(query == null || query == undefined || query.length == 0) {
+    if (query == null || query == undefined || query.length == 0) {
         socket.destroy(new Error("No JWT supplied in the request."));
         return;
     }
 
     let decodedToken = verifyJWT(query);
 
-    if(decodedToken == null || decodedToken == undefined) {
+    if (decodedToken == null || decodedToken == undefined) {
         socket.destroy(new Error("JWT verification failed."));
         return;
     }
 
-    if(decodedToken.verified == null) {
+    if (decodedToken.verified == null) {
         socket.destroy(new Error("Only verified users can join a game."));
         return;
     }
@@ -98,7 +108,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
                 let gamedata = pathServer.get(key)?.gamedata;
 
                 // typescript complains if this check doesn't exist even though we already check for a null...
-                if(query != null) {
+                if (query != null) {
                     gamedata?.players.add(new Player(decodedToken.uuid, 0));
                 }
 
@@ -132,21 +142,23 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
     wss.on('connection', function connection(ws, req) {
         // re-retrieve the token within the WS server
         let pathName = new URL(req.url as string, 'ws://localhost:8080');
-    
+
         let clientToken = pathName.searchParams.get("token");
 
         // this shouldn't happen because this verification already happened on the UPGRADE request side, but just in case...
-        if(clientToken == null) {
+        if (clientToken == null) {
             ws.close(1000, `Your request got malformed when redirected to a WS server. Please contact an administrator.`);
             return;
         }
 
         //TODO: replace with a decoder without verification in case it's way more performant than passing the verification twice
         const decodedToken = verifyJWT(clientToken);
-        if(decodedToken == null) {
+        if (decodedToken == null) {
             ws.close(1000, `Your request got malformed when redirected to a WS server. Please contact an administrator.`);
             return;
         }
+
+        const uuid = decodedToken.uuid;
 
         ws.on('error', console.error);
 
@@ -167,22 +179,26 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                     case (WsCommand.chat):
                         wss.clients.forEach(function each(client) {
                             if (client !== ws && client.readyState === WebSocket.OPEN) {
-                                client.send(`{\"response\":0,\"uuid\":\"${json.uuid}\",\"message\":\"${json.message}\"}`);
+                                client.send(`{\"response\":0,\"uuid\":\"${uuid}\",\"message\":\"${json.message}\"}`);
                             }
                         });
                         break;
                     case (WsCommand.applySettings):
                         let currentData = initialGamedata;
                         if (currentData != undefined) {
-                            updateGamedata(json, currentData);
-                            //updateDynamoTable(upgradePath);
-                            wss.clients.forEach(function each(client) {
-                                if (client !== ws && client.readyState === WebSocket.OPEN) {
-                                    if (currentData != undefined) {
-                                        client.send(settingsInformation(currentData));
+                            try {
+                                updateGamedata(json, currentData);
+                                //updateDynamoTable(upgradePath);
+                                wss.clients.forEach(function each(client) {
+                                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                        if (currentData != undefined) {
+                                            client.send(settingsInformation(currentData));
+                                        }
                                     }
-                                }
-                            });
+                                });
+                            } catch (error) {
+                                ws.send(`{\"response\":100}`)
+                            }
                         }
                         break;
                     case (WsCommand.start):
@@ -217,8 +233,8 @@ async function updateDynamoTable(key: string) {
     let settings = pathServer.get(key)?.gamedata;
     let playersArray: string[] = [];
 
-    if(settings != undefined) {
-        for(let player of settings?.players) {
+    if (settings != undefined) {
+        for (let player of settings?.players) {
             playersArray.push(player.uuid);
         }
     }
@@ -228,15 +244,15 @@ async function updateDynamoTable(key: string) {
         let input = {
             "TableName": "sample-data-with-sort",
             "Item": {
-                "RoomId": {"S": key},
-                "RoomName": {"S": settings.name},
-                "CurrentCount":{"N": String(settings.players.size)},
-                "MaxPlayers": {"N": String(settings.maxPlayers)},
-                "HostId": { "S": settings.ownerUuid},
-                "Private": {"N": "1"},
-                "JoinKey": {"S": settings.joinKey},
-                "Status": {"N": String(settings.status)},
-                "Players": {"SS": playersArray}
+                "RoomId": { "S": key },
+                "RoomName": { "S": settings.name },
+                "CurrentCount": { "N": String(settings.players.size) },
+                "MaxPlayers": { "N": String(settings.maxPlayers) },
+                "HostId": { "S": settings.ownerUuid },
+                "Private": { "N": "1" },
+                "JoinKey": { "S": settings.joinKey },
+                "Status": { "N": String(settings.status) },
+                "Players": { "SS": playersArray }
             }
         }
         await client.send(new PutItemCommand(input));
@@ -244,14 +260,14 @@ async function updateDynamoTable(key: string) {
         let input = {
             "TableName": "sample-data-with-sort",
             "Item": {
-                "RoomId": {"S": key},
-                "RoomName": {"S": settings.name},
-                "CurrentCount": {"N": String(settings.players.size)},
-                "MaxPlayers": {"N": String(settings.maxPlayers)},
-                "HostId": {"S": settings.ownerUuid},
-                "Private": {"N": "0"},
-                "Status": {"N": String(settings.status)},
-                "Players": {"SS": playersArray}
+                "RoomId": { "S": key },
+                "RoomName": { "S": settings.name },
+                "CurrentCount": { "N": String(settings.players.size) },
+                "MaxPlayers": { "N": String(settings.maxPlayers) },
+                "HostId": { "S": settings.ownerUuid },
+                "Private": { "N": "0" },
+                "Status": { "N": String(settings.status) },
+                "Players": { "SS": playersArray }
             }
         }
         await client.send(new PutItemCommand(input));
@@ -319,11 +335,11 @@ function settingsInformation(gamedata: Gamedata): string {
     return `{"response":1,"name":"${gamedata.name}","maxPlayers":"${gamedata.maxPlayers}","isPrivate":"${gamedata.isPrivate}","joinKey":"${gamedata.joinKey}","gamemode":0,"status":"0"}`;
 };
 
-function joinInformation(gamedata:Gamedata):string {
+function joinInformation(gamedata: Gamedata): string {
     let players: string[] = [];
 
-    for(let player of gamedata.players) {
-            players.push(player.uuid);
+    for (let player of gamedata.players) {
+        players.push(player.uuid);
     }
 
     return `{"response":2,"players":${players}}`;
