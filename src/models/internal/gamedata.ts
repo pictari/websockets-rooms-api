@@ -1,4 +1,4 @@
-import { Player } from "./player";
+import { ReadyStatus } from "./json_objects/player";
 
 export class Gamedata {
     dynamoIdentifier?:string;
@@ -10,7 +10,7 @@ export class Gamedata {
     gamemode:Gamemode;
     status:Status = Status.waiting;
 
-    players:Set<Player> = new Set;
+    players:Map<string, ReadyStatus> = new Map();
 
     constructor(name: string, ownerUuid: string, maxPlayers: number, isPrivate: boolean, gamemode: Gamemode) {
         this.name = name;

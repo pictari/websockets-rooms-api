@@ -5,8 +5,11 @@ import { Gamedata, Status } from './models/internal/gamedata';
 import { DeleteItemCommand, DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { WsCommand } from './models/internal/wscommand';
 import { WsGamedata } from './models/internal/wsgamedata';
-import { Player } from './models/internal/player';
 import { verifyJWT } from './jwthelpers';
+import { WsResponse } from './models/internal/wsresponse';
+import { SettingsResponse } from './models/internal/json_objects/settingsResponse';
+import { Player, ReadyStatus } from './models/internal/json_objects/player';
+import { PlayerResponse } from './models/internal/json_objects/playerResponse';
 
 const pathServer: Map<string, WsGamedata> = new Map();
 const client: DynamoDBClient = new DynamoDBClient({});
@@ -65,7 +68,7 @@ const server = createServer((req, res) => {
                     return;
                 }
                 let newPath = raiseNewWSServer(gamedata);
-                //updateDynamoTable(newPath);
+                updateDynamoTable(newPath);
                 res.writeHead(201, { "content-type": "application/json" });
                 res.end(`{ "newServerPath": \"${newPath}\" }`);
             }
@@ -111,7 +114,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
                 // typescript complains if this check doesn't exist even though we already check for a null...
                 if (query != null) {
-                    gamedata?.players.add(new Player(decodedToken.uuid, 0));
+                    gamedata?.players.set(decodedToken.uuid, ReadyStatus.pending);
                 }
 
                 wss?.handleUpgrade(request, socket, head, function done(ws) {
@@ -143,9 +146,10 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
     // set up behavior
     wss.on('connection', function connection(ws, req) {
         // re-retrieve the token within the WS server
-        let pathName = new URL(req.url as string, 'ws://localhost:8080');
-
-        let clientToken = pathName.searchParams.get("token");
+        const clientToken = new URL(req.url as string, 'ws://localhost:8080').searchParams.get("token");
+        // keep references in the listener itself just in case
+        const gamedataReference = initialGamedata;
+        const path = upgradePath;
 
         // this shouldn't happen because this verification already happened on the UPGRADE request side, but just in case...
         if (clientToken == null) {
@@ -169,7 +173,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
             ws.send(settingsInformation(initialGamedata));
             wss.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
-                    client.send(joinInformation(initialGamedata));
+                    client.send(playerInformation(initialGamedata));
                 }
             });
         });
@@ -180,38 +184,73 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                 switch (json.command) {
                     case (WsCommand.chat):
                         wss.clients.forEach(function each(client) {
-                            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                                client.send(`{\"response\":0,\"uuid\":\"${uuid}\",\"message\":\"${json.message}\"}`);
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(`{\"response\":${WsResponse.chat},\"uuid\":\"${uuid}\",\"message\":\"${json.message}\"}`);
                             }
                         });
                         break;
                     case (WsCommand.applySettings):
-                        let currentData = initialGamedata;
+                        if(uuid != gamedataReference.ownerUuid) {
+                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            break;
+                        }
+
+                        let currentData = gamedataReference;
                         if (currentData != undefined) {
                             try {
                                 updateGamedata(json, currentData);
-                                //updateDynamoTable(upgradePath);
+                                updateDynamoTable(upgradePath);
                                 wss.clients.forEach(function each(client) {
-                                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                    if (client.readyState === WebSocket.OPEN) {
                                         if (currentData != undefined) {
                                             client.send(settingsInformation(currentData));
                                         }
                                     }
                                 });
                             } catch (error) {
-                                ws.send(`{\"response\":100}`)
+                                ws.send(`{\"response\":${WsResponse.error}}`);
                             }
                         }
                         break;
                     case (WsCommand.start):
+                        if(uuid != gamedataReference.ownerUuid) {
+                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            break;
+                        }
                         //TODO: raise a gameserver here
                         break;
                     case (WsCommand.disband):
+                        if(uuid != gamedataReference.ownerUuid) {
+                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            break;
+                        }
+
                         wss.clients.forEach(function each(client) {
-                            client.send(`{\"response\":3}`);
+                            client.send(`{\"response\":${WsResponse.closeSession}}`);
                             client.close(1000, `Owner of the room has closed this session.`);
                         });
-                        cleanup(upgradePath);
+                        cleanup(path);
+                        break;
+                    case(WsCommand.ready):
+                        gamedataReference.players.set(uuid, gamedataReference.players.get(uuid) ? ReadyStatus.pending : ReadyStatus.ready);
+                        wss.clients.forEach(function each(client) {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(playerInformation(initialGamedata));
+                            }
+                        });
+                        break;
+                    case(WsCommand.finish):
+                        if(uuid != gamedataReference.ownerUuid) {
+                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            break;
+                        }
+
+                        gamedataReference.status = Status.waiting;
+                        wss.clients.forEach(function each(client) {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(settingsInformation(gamedataReference));
+                            }
+                        });
                         break;
                     default:
                         break;
@@ -236,8 +275,8 @@ async function updateDynamoTable(key: string) {
     let playersArray: string[] = [];
 
     if (settings != undefined) {
-        for (let player of settings?.players) {
-            playersArray.push(player.uuid);
+        for (let player of settings?.players.keys()) {
+            playersArray.push(player);
         }
     }
 
@@ -334,15 +373,18 @@ function updateGamedata(json: any, gamedata: Gamedata) {
 }
 
 function settingsInformation(gamedata: Gamedata): string {
-    return `{"response":1,"name":"${gamedata.name}","maxPlayers":"${gamedata.maxPlayers}","isPrivate":"${gamedata.isPrivate}","joinKey":"${gamedata.joinKey}","gamemode":0,"status":"0"}`;
+    return JSON.stringify(new SettingsResponse(gamedata.name, gamedata.maxPlayers, gamedata.isPrivate, gamedata.gamemode, gamedata.status, gamedata.joinKey));
 };
 
-function joinInformation(gamedata: Gamedata): string {
-    let players: string[] = [];
+function playerInformation(gamedata: Gamedata): string {
+    let players: Player[] = [];
 
-    for (let player of gamedata.players) {
-        players.push(player.uuid);
+    for (let player of gamedata.players.keys()) {
+        let t = gamedata.players.get(player);
+        if(t != undefined) {
+            players.push(new Player(player, t));
+        }
     }
 
-    return `{"response":2,"players":${players}}`;
+    return JSON.stringify(new PlayerResponse(players));
 }

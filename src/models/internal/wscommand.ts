@@ -3,7 +3,6 @@ export enum WsCommand {
     applySettings,
     start,
     disband,
-    join,
     ready,
     finish
 }
