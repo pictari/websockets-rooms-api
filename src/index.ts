@@ -6,13 +6,10 @@ import { DeleteItemCommand, DynamoDBClient, PutItemCommand } from '@aws-sdk/clie
 import { WsCommand } from './models/internal/wscommand';
 import { WsGamedata } from './models/internal/wsgamedata';
 import { Player } from './models/internal/player';
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { verifyJWT } from './jwthelpers';
 
 const pathServer: Map<string, WsGamedata> = new Map();
-// const pathServer: Map<string, WebSocketServer> = new Map();
-// const pathSettings: Map<string, Gamedata> = new Map();
 const client: DynamoDBClient = new DynamoDBClient({});
-const docClient: DynamoDBDocumentClient = DynamoDBDocumentClient.from(client);
 
 // https://medium.com/@libinthomas33/building-a-crud-api-server-in-node-js-using-http-module-9fac57e2f47d
 const server = createServer((req, res) => {
@@ -41,6 +38,12 @@ const server = createServer((req, res) => {
             
             // make the server with initial gamedata
             if (req.method === 'POST') {
+                let auth = req.headers.authorization;
+                console.log(auth);
+
+                if(auth == undefined || auth == null) {
+
+                }
                 let gamedata: Gamedata;
                 try {
                     gamedata = createGamedata(resultingJson);
@@ -70,7 +73,20 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
     let query = pathName.searchParams.get("token");
     if(query == null || query == undefined || query.length == 0) {
-        socket.destroy();
+        socket.destroy(new Error("No JWT supplied in the request."));
+        return;
+    }
+
+    let decodedToken = verifyJWT(query);
+
+    if(decodedToken == null || decodedToken == undefined) {
+        socket.destroy(new Error("JWT verification failed."));
+        return;
+    }
+
+    if(decodedToken.verified == null) {
+        socket.destroy(new Error("Only verified users can join a game."));
+        return;
     }
 
     // cycle through all the active "sub"servers
@@ -83,7 +99,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
                 // typescript complains if this check doesn't exist even though we already check for a null...
                 if(query != null) {
-                    gamedata?.players.add(new Player(query, 0));
+                    gamedata?.players.add(new Player(decodedToken.uuid, 0));
                 }
 
                 wss?.handleUpgrade(request, socket, head, function done(ws) {
@@ -97,7 +113,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
     }
 
     if (!found) {
-        socket.destroy();
+        socket.destroy(new Error("Couldn't find a WebSockets server with that key."));
     }
 });
 
@@ -114,7 +130,35 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
     // set up behavior
     wss.on('connection', function connection(ws, req) {
+        // re-retrieve the token within the WS server
+        let pathName = new URL(req.url as string, 'ws://localhost:8080');
+    
+        let clientToken = pathName.searchParams.get("token");
+
+        // this shouldn't happen because this verification already happened on the UPGRADE request side, but just in case...
+        if(clientToken == null) {
+            ws.close(1000, `Your request got malformed when redirected to a WS server. Please contact an administrator.`);
+            return;
+        }
+
+        //TODO: replace with a decoder without verification in case it's way more performant than passing the verification twice
+        const decodedToken = verifyJWT(clientToken);
+        if(decodedToken == null) {
+            ws.close(1000, `Your request got malformed when redirected to a WS server. Please contact an administrator.`);
+            return;
+        }
+
         ws.on('error', console.error);
+
+        ws.on('open', function handleOpen() {
+            // resend the current settings; refresh player list for everyone in the lobby
+            ws.send(settingsInformation(initialGamedata));
+            wss.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(joinInformation(initialGamedata));
+                }
+            });
+        });
 
         ws.on('message', function message(data) {
             try {
@@ -146,10 +190,8 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         break;
                     case (WsCommand.disband):
                         wss.clients.forEach(function each(client) {
-                            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                                client.send(`{\"response\":3}`);
-                                client.close(1000, `Owner of the room has closed this session.`);
-                            }
+                            client.send(`{\"response\":3}`);
+                            client.close(1000, `Owner of the room has closed this session.`);
                         });
                         cleanup(upgradePath);
                         break;
@@ -276,3 +318,13 @@ function updateGamedata(json: any, gamedata: Gamedata) {
 function settingsInformation(gamedata: Gamedata): string {
     return `{"response":1,"name":"${gamedata.name}","maxPlayers":"${gamedata.maxPlayers}","isPrivate":"${gamedata.isPrivate}","joinKey":"${gamedata.joinKey}","gamemode":0,"status":"0"}`;
 };
+
+function joinInformation(gamedata:Gamedata):string {
+    let players: string[] = [];
+
+    for(let player of gamedata.players) {
+            players.push(player.uuid);
+    }
+
+    return `{"response":2,"players":${players}}`;
+}
