@@ -47,8 +47,9 @@ const server = createServer((req, res) => {
                     return;
                 }
                 let token = verifyJWT(auth);
+                let uuid = token.uuid;
 
-                if (token == null || token == undefined) {
+                if (token == null || token == undefined || uuid == undefined || uuid == null) {
                     res.writeHead(403, { "content-type": "text/html" });
                     res.end("Invalid JWT.");
                     return;
@@ -57,6 +58,7 @@ const server = createServer((req, res) => {
 
                 try {
                     gamedata = createGamedata(resultingJson);
+                    gamedata.ownerUuid = uuid;
                 } catch (error) {
                     res.writeHead(400, { "content-type": "text/html" });
                     res.end("The request body contains malformed JSON.\n\n" + error);
