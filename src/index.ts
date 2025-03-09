@@ -50,8 +50,7 @@ const server = createServer((req, res) => {
                     res.end("Missing authorization header. You must be logged in to create a room.");
                     return;
                 }
-
-                let extractedToken = auth?.split(' ')[1];
+                let extractedToken = auth?.toString().split(" ")[1];
                 console.log(extractedToken);
 
                 if (extractedToken == undefined || extractedToken == null) {
@@ -60,9 +59,16 @@ const server = createServer((req, res) => {
                     return;
                 }
                 let token = verifyJWT(extractedToken);
+
+                if (token == null || token == undefined) {
+                    res.writeHead(403, { "content-type": "text/html" });
+                    res.end("Invalid JWT.");
+                    return;
+                }
+
                 let uuid = token.uuid;
 
-                if (token == null || token == undefined || uuid == undefined || uuid == null) {
+                if (uuid == undefined || uuid == null) {
                     res.writeHead(403, { "content-type": "text/html" });
                     res.end("Invalid JWT.");
                     return;
@@ -78,7 +84,7 @@ const server = createServer((req, res) => {
                     return;
                 }
                 let newPath = raiseNewWSServer(gamedata);
-                updateDynamoTable(newPath);
+                //updateDynamoTable(newPath);
                 res.writeHead(201, { "content-type": "application/json" });
                 res.end(`{ "newServerPath": \"${newPath}\" }`);
             }
@@ -109,7 +115,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
         return;
     }
 
-    if (decodedToken.verified == null) {
+    if (decodedToken.verified == null || decodedToken.verified == 0) {
         socket.destroy(new Error("Only verified users can join a game."));
         return;
     }
@@ -176,17 +182,26 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
         const uuid = decodedToken.uuid;
 
+        // resend the current settings; refresh player list for everyone in the lobby
+        ws.send(settingsInformation(initialGamedata));
+        wss.clients.forEach(function each(client) {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(playerInformation(initialGamedata));
+            }
+        });
+
+
         ws.on('error', console.error);
 
+        // this never gets triggered and I'm not sure why - their documentation just says "emits on connection opened"
         ws.on('open', function handleOpen() {
-            // resend the current settings; refresh player list for everyone in the lobby
-            ws.send(settingsInformation(initialGamedata));
-            wss.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(playerInformation(initialGamedata));
-                }
-            });
+            console.log("Open event fired")
         });
+
+        ws.on('close', function handleClose() {
+            gamedataReference.players.delete(uuid);
+            //updateDynamoTable(upgradePath);
+        })
 
         ws.on('message', function message(data) {
             try {
@@ -209,7 +224,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         if (currentData != undefined) {
                             try {
                                 updateGamedata(json, currentData);
-                                updateDynamoTable(upgradePath);
+                                //updateDynamoTable(upgradePath);
                                 wss.clients.forEach(function each(client) {
                                     if (client.readyState === WebSocket.OPEN) {
                                         if (currentData != undefined) {
@@ -227,7 +242,9 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             ws.send(`{\"response\":${WsResponse.error}}`);
                             break;
                         }
+
                         //TODO: raise a gameserver here
+                        gamedataReference.status = Status.ongoing;
                         break;
                     case (WsCommand.disband):
                         if(uuid != gamedataReference.ownerUuid) {
@@ -291,34 +308,68 @@ async function updateDynamoTable(key: string) {
     }
 
     // the entity is shaped differently depending on whether the room is public or private
+    // they also differ based on player count, as passing in a null array makes dynamo crash
     if (settings?.isPrivate && settings.joinKey != undefined) {
-        let input = {
-            "TableName": "sample-data-with-sort",
-            "Item": {
-                "RoomId": { "S": key },
-                "RoomName": { "S": settings.name },
-                "CurrentCount": { "N": String(settings.players.size) },
-                "MaxPlayers": { "N": String(settings.maxPlayers) },
-                "HostId": { "S": settings.ownerUuid },
-                "Private": { "N": "1" },
-                "JoinKey": { "S": settings.joinKey },
-                "Status": { "N": String(settings.status) },
-                "Players": { "SS": playersArray }
+        let input;
+        if(playersArray.length > 0) {
+            input = {
+                "TableName": "sample-data-with-sort",
+                "Item": {
+                    "RoomId": { "S": key },
+                    "RoomName": { "S": settings.name },
+                    "CurrentCount": { "N": String(settings.players.size) },
+                    "MaxPlayers": { "N": String(settings.maxPlayers) },
+                    "HostId": { "S": settings.ownerUuid },
+                    "Private": { "N": "1" },
+                    "JoinKey": { "S": settings.joinKey },
+                    "Status": { "N": String(settings.status) },
+                    "Players": { "SS": playersArray }
+                }
+            }
+        } else {
+            input = {
+                "TableName": "sample-data-with-sort",
+                "Item": {
+                    "RoomId": { "S": key },
+                    "RoomName": { "S": settings.name },
+                    "CurrentCount": { "N": String(settings.players.size) },
+                    "MaxPlayers": { "N": String(settings.maxPlayers) },
+                    "HostId": { "S": settings.ownerUuid },
+                    "Private": { "N": "1" },
+                    "JoinKey": { "S": settings.joinKey },
+                    "Status": { "N": String(settings.status) },
+                }
             }
         }
         await client.send(new PutItemCommand(input));
     } else if (settings != undefined) {
-        let input = {
-            "TableName": "sample-data-with-sort",
-            "Item": {
-                "RoomId": { "S": key },
-                "RoomName": { "S": settings.name },
-                "CurrentCount": { "N": String(settings.players.size) },
-                "MaxPlayers": { "N": String(settings.maxPlayers) },
-                "HostId": { "S": settings.ownerUuid },
-                "Private": { "N": "0" },
-                "Status": { "N": String(settings.status) },
-                "Players": { "SS": playersArray }
+        let input;
+        if(playersArray.length > 0) {
+            input = {
+                "TableName": "sample-data-with-sort",
+                "Item": {
+                    "RoomId": { "S": key },
+                    "RoomName": { "S": settings.name },
+                    "CurrentCount": { "N": String(settings.players.size) },
+                    "MaxPlayers": { "N": String(settings.maxPlayers) },
+                    "HostId": { "S": settings.ownerUuid },
+                    "Private": { "N": "0" },
+                    "Status": { "N": String(settings.status) },
+                    "Players": { "SS": playersArray }
+                }
+            }
+        } else {
+            input = {
+                "TableName": "sample-data-with-sort",
+                "Item": {
+                    "RoomId": { "S": key },
+                    "RoomName": { "S": settings.name },
+                    "CurrentCount": { "N": String(settings.players.size) },
+                    "MaxPlayers": { "N": String(settings.maxPlayers) },
+                    "HostId": { "S": settings.ownerUuid },
+                    "Private": { "N": "0" },
+                    "Status": { "N": String(settings.status) }
+                }
             }
         }
         await client.send(new PutItemCommand(input));
@@ -337,7 +388,8 @@ async function cleanup(key: string) {
         }
     }
 
-    await client.send(new DeleteItemCommand(input));
+    //TODO: fix dynamo first
+    //await client.send(new DeleteItemCommand(input));
 }
 
 // JSON parsing creates an equivalent of an anonymous class, so the incoming type can't be anything other than any
