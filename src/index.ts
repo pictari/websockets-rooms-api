@@ -42,6 +42,7 @@ const server = createServer((req, res) => {
             // make the server with initial gamedata
             if (req.method === 'POST') {
                 let auth = req.headers.authorization;
+
                 console.log(auth);
 
                 if (auth == undefined || auth == null) {
@@ -49,7 +50,16 @@ const server = createServer((req, res) => {
                     res.end("Missing authorization header. You must be logged in to create a room.");
                     return;
                 }
-                let token = verifyJWT(auth);
+
+                let extractedToken = auth?.split(' ')[1];
+                console.log(extractedToken);
+
+                if (extractedToken == undefined || extractedToken == null) {
+                    res.writeHead(401, { "content-type": "text/html" });
+                    res.end("You must include a token in the authorization header in form of 'Authorization: [type] [token]'");
+                    return;
+                }
+                let token = verifyJWT(extractedToken);
                 let uuid = token.uuid;
 
                 if (token == null || token == undefined || uuid == undefined || uuid == null) {
@@ -60,7 +70,7 @@ const server = createServer((req, res) => {
                 let gamedata: Gamedata;
 
                 try {
-                    gamedata = createGamedata(resultingJson);
+                    gamedata = createGamedata(resultingJson, uuid);
                     gamedata.ownerUuid = uuid;
                 } catch (error) {
                     res.writeHead(400, { "content-type": "text/html" });
@@ -331,9 +341,9 @@ async function cleanup(key: string) {
 }
 
 // JSON parsing creates an equivalent of an anonymous class, so the incoming type can't be anything other than any
-function createGamedata(json: any): Gamedata {
+function createGamedata(json: any, uuid: string): Gamedata {
     let name: string = json.name;
-    let ownerUuid: string = json.ownerUuid;
+    let ownerUuid: string = uuid;
     let maxPlayers: number = json.maxPlayers;
     let isPrivate: boolean = json.isPrivate;
     let joinKey: string;
