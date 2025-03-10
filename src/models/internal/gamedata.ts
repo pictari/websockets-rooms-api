@@ -27,5 +27,6 @@ export enum Gamemode {
 
 export enum Status {
     waiting,
-    ongoing
+    ongoing,
+    closing
 }

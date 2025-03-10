@@ -84,7 +84,7 @@ const server = createServer((req, res) => {
                     return;
                 }
                 let newPath = raiseNewWSServer(gamedata);
-                //updateDynamoTable(newPath);
+                updateDynamoTable(newPath);
                 res.writeHead(201, { "content-type": "application/json" });
                 res.end(`{ "newServerPath": \"${newPath}\" }`);
             }
@@ -131,6 +131,8 @@ server.on('upgrade', function upgrade(request, socket, head) {
                 // typescript complains if this check doesn't exist even though we already check for a null...
                 if (query != null) {
                     gamedata?.players.set(decodedToken.uuid, ReadyStatus.pending);
+                    updateDynamoTable(key);
+                    console.log("Set the player in the gamedata");
                 }
 
                 wss?.handleUpgrade(request, socket, head, function done(ws) {
@@ -200,7 +202,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
         ws.on('close', function handleClose() {
             gamedataReference.players.delete(uuid);
-            //updateDynamoTable(upgradePath);
+            updateDynamoTable(upgradePath);
         })
 
         ws.on('message', function message(data) {
@@ -224,7 +226,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         if (currentData != undefined) {
                             try {
                                 updateGamedata(json, currentData);
-                                //updateDynamoTable(upgradePath);
+                                updateDynamoTable(upgradePath);
                                 wss.clients.forEach(function each(client) {
                                     if (client.readyState === WebSocket.OPEN) {
                                         if (currentData != undefined) {
@@ -256,6 +258,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             client.send(`{\"response\":${WsResponse.closeSession}}`);
                             client.close(1000, `Owner of the room has closed this session.`);
                         });
+                        gamedataReference.status = Status.closing;
                         cleanup(path);
                         break;
                     case(WsCommand.ready):
@@ -302,6 +305,9 @@ async function updateDynamoTable(key: string) {
     let playersArray: string[] = [];
 
     if (settings != undefined) {
+        if(settings.status == Status.closing) {
+            return;
+        }
         for (let player of settings?.players.keys()) {
             playersArray.push(player);
         }
@@ -377,19 +383,30 @@ async function updateDynamoTable(key: string) {
 }
 
 async function cleanup(key: string) {
-    pathServer.delete(key);
+    let compositeKey = pathServer.get(key)?.gamedata.isPrivate;
+    if(compositeKey == undefined) {
+        return;
+    }
 
     let input = {
         "TableName": "sample-data-with-sort",
         "Key": {
             "RoomId": {
                 "S": key
+            },
+            "Private":{
+                "N":  `${compositeKey ? 1 : 0}`
             }
         }
     }
 
-    //TODO: fix dynamo first
-    //await client.send(new DeleteItemCommand(input));
+    try {
+        await client.send(new DeleteItemCommand(input));
+    } catch(e) {
+        console.log(e);
+    }
+
+    pathServer.delete(key);
 }
 
 // JSON parsing creates an equivalent of an anonymous class, so the incoming type can't be anything other than any
