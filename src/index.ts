@@ -174,6 +174,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
         // keep references in the listener itself just in case
         const gamedataReference = initialGamedata;
         const path = upgradePath;
+        let isAlive = true;
 
         // this shouldn't happen because this verification already happened on the UPGRADE request side, but just in case...
         if (clientToken == null) {
@@ -198,6 +199,16 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
             }
         });
 
+        // set up heartbeat
+        const interval = setInterval(function ping() {
+            wss.clients.forEach(function each(ws) {
+              if (isAlive === false) return ws.terminate();
+          
+              isAlive = false;
+              ws.ping();
+            });
+          }, 30000);
+
 
         ws.on('error', console.error);
 
@@ -207,8 +218,17 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
         });
 
         ws.on('close', function handleClose() {
+            if(gamedataReference.status == Status.closing) {
+                return;
+            }
+
+            clearInterval(interval);
             gamedataReference.players.delete(uuid);
             updateDynamoTable(upgradePath);
+        })
+
+        ws.on('pong', function heartbeat() {
+            isAlive = true;
         })
 
         ws.on('message', function message(data) {
@@ -260,11 +280,11 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             break;
                         }
 
+                        gamedataReference.status = Status.closing;
                         wss.clients.forEach(function each(client) {
                             client.send(`{\"response\":${WsResponse.closeSession}}`);
                             client.close(1000, `Owner of the room has closed this session.`);
                         });
-                        gamedataReference.status = Status.closing;
                         cleanup(path);
                         break;
                     case(WsCommand.ready):
