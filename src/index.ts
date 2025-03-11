@@ -12,7 +12,13 @@ import { Player, ReadyStatus } from './models/internal/json_objects/player';
 import { PlayerResponse } from './models/internal/json_objects/playerResponse';
 
 const pathServer: Map<string, WsGamedata> = new Map();
-const client: DynamoDBClient = new DynamoDBClient({});
+const client : DynamoDBClient = new DynamoDBClient({
+    region: process.env.DYNAMOREGION as string,
+    credentials: {
+        accessKeyId: process.env.DYNAMOPUBLICACCESSKEY as string,
+        secretAccessKey: process.env.DYNAMOSECRETACCESSKEY as string
+    }
+});
 
 // https://medium.com/@libinthomas33/building-a-crud-api-server-in-node-js-using-http-module-9fac57e2f47d
 const server = createServer((req, res) => {
@@ -304,14 +310,18 @@ async function updateDynamoTable(key: string) {
     let settings = pathServer.get(key)?.gamedata;
     let playersArray: string[] = [];
 
-    if (settings != undefined) {
-        if(settings.status == Status.closing) {
-            return;
-        }
-        for (let player of settings?.players.keys()) {
-            playersArray.push(player);
-        }
+    if(settings == undefined) {
+        return;
     }
+    
+    if(settings.status == Status.closing) {
+        return;
+    }
+
+    for (let player of settings?.players.keys()) {
+        playersArray.push(player);
+    }
+
 
     // the entity is shaped differently depending on whether the room is public or private
     // they also differ based on player count, as passing in a null array makes dynamo crash
@@ -348,7 +358,7 @@ async function updateDynamoTable(key: string) {
             }
         }
         await client.send(new PutItemCommand(input));
-    } else if (settings != undefined) {
+    } else {
         let input;
         if(playersArray.length > 0) {
             input = {
