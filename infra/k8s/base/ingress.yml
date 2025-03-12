@@ -1,0 +1,17 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rooms-api-ingress
+  namespace: pictari-web
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`rooms.pictari.app`)
+      services:
+        - name: rooms-api
+          port: 3000
+  tls:
+    certResolver: letsencrypt

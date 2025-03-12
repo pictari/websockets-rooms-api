@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rooms-api
+  labels:
+    app: rooms-api
+  namespace: pictari-web
+spec:
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: rooms-api
+  template:
+    metadata:
+      labels:
+        app: rooms-api
+        tier: front
+      namespace: pictari-web
+      annotations:
+        update-trigger: "1"
+    spec:
+      containers:
+        - name: rooms-api
+          image: "${IMAGE_TAG}"
+          ports:
+            - name: http
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: 65m
+              memory: 256Mi
+            limits:
+              memory: 256Mi
+          envFrom:
+            - configMapRef:
+                name: logging-defaults
+            - secretRef:
+                name: rooms-api

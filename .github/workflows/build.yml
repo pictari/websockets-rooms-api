@@ -1,0 +1,26 @@
+name: Deploy API
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build:
+    name: Build the package
+    uses: pictari/cicd-pipeline/.github/workflows/build.yml@master
+    with:
+      image-name: rooms-api
+      docker-file-path: infra/docker/Dockerfile
+    secrets: inherit
+
+  k8s-deploy:
+    name: Deploy to K8s
+    uses: pictari/cicd-pipeline/.github/workflows/k8s.yml@master
+    needs: build
+    with:
+      manifest-path: infra/k8s/production
+      image-name: rooms-api
+    secrets: inherit
