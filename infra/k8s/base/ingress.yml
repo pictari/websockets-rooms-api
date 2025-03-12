@@ -12,6 +12,6 @@ spec:
       match: Host(`rooms.pictari.app`)
       services:
         - name: rooms-api
-          port: 3000
+          port: 8080
   tls:
     certResolver: letsencrypt
