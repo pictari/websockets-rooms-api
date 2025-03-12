@@ -10,6 +10,10 @@ import { WsResponse } from './models/internal/wsresponse';
 import { SettingsResponse } from './models/internal/json_objects/settingsResponse';
 import { Player, ReadyStatus } from './models/internal/json_objects/player';
 import { PlayerResponse } from './models/internal/json_objects/playerResponse';
+import dotenv from "dotenv";
+
+dotenv.config();
+
 
 const pathServer: Map<string, WsGamedata> = new Map();
 const client : DynamoDBClient = new DynamoDBClient({
@@ -105,7 +109,7 @@ const server = createServer((req, res) => {
 server.on('upgrade', function upgrade(request, socket, head) {
     // the query in this actually just uses UUID for now, until we get proper authorization going
     // change base url when we get a domain
-    let pathName = new URL(request.url as string, 'ws://localhost:8080');
+    let pathName = new URL(request.url as string, `ws://${process.env.WSDOMAIN}`);
     let found: boolean = false;
 
     let query = pathName.searchParams.get("token");
@@ -170,13 +174,14 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
     // set up behavior
     wss.on('connection', function connection(ws, req) {
         // re-retrieve the token within the WS server
-        const clientToken = new URL(req.url as string, 'ws://localhost:8080').searchParams.get("token");
+        const clientToken = new URL(req.url as string, `ws://${process.env.WSDOMAIN}`).searchParams.get("token");
         // keep references in the listener itself just in case
         const gamedataReference = initialGamedata;
         const path = upgradePath;
         let isAlive = true;
 
         // this shouldn't happen because this verification already happened on the UPGRADE request side, but just in case...
+        // also to conform to strict type checking
         if (clientToken == null) {
             ws.close(1000, `Your request got malformed when redirected to a WS server. Please contact an administrator.`);
             return;
@@ -244,7 +249,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         break;
                     case (WsCommand.applySettings):
                         if(uuid != gamedataReference.ownerUuid) {
-                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Only the owner of a room can execute this command.\"}`);
                             break;
                         }
 
@@ -261,13 +266,13 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                                     }
                                 });
                             } catch (error) {
-                                ws.send(`{\"response\":${WsResponse.error}}`);
+                                ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Failed to update the current gamedata. Try again.\"}`);
                             }
                         }
                         break;
                     case (WsCommand.start):
                         if(uuid != gamedataReference.ownerUuid) {
-                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Only the owner of a room can execute this command.\"}}`);
                             break;
                         }
 
@@ -276,7 +281,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         break;
                     case (WsCommand.disband):
                         if(uuid != gamedataReference.ownerUuid) {
-                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Only the owner of a room can execute this command.\"}}`);
                             break;
                         }
 
@@ -297,7 +302,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         break;
                     case(WsCommand.finish):
                         if(uuid != gamedataReference.ownerUuid) {
-                            ws.send(`{\"response\":${WsResponse.error}}`);
+                            ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Only the owner of a room can execute this command.\"}}`);
                             break;
                         }
 
@@ -313,11 +318,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                 }
             } catch (error) {
                 // replace this once we finish debugging
-                wss.clients.forEach(function each(client) {
-                    if (client !== ws && client.readyState === WebSocket.OPEN) {
-                        client.send("Malformed data: " + error);
-                    }
-                });
+                ws.send("Malformed data: " + error);
             }
         });
     });

@@ -1,7 +1,6 @@
 import { ReadyStatus } from "./json_objects/player";
 
 export class Gamedata {
-    dynamoIdentifier?:string;
     name:string;
     ownerUuid:string;
     maxPlayers:number;

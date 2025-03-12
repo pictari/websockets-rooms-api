@@ -3,6 +3,14 @@ import { WsResponse } from "../wsresponse";
 
 export class SettingsResponse {
     response:WsResponse = WsResponse.settingsUpdate;
+    settings: Settings;
+
+    constructor(name:string,maxPlayers:number,isPrivate:boolean,gamemode:Gamemode,status:Status,joinKey?:string) {
+        this.settings = new Settings(name, maxPlayers, isPrivate, gamemode, status, joinKey)
+    }
+}
+
+class Settings {
     name:string;
     maxPlayers:number;
     isPrivate:boolean;
