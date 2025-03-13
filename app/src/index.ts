@@ -240,6 +240,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
         });
 
         ws.on('close', function handleClose() {
+            console.log('Closing session for ' + uuid);
             if(gamedataReference.status == Status.closing) {
                 return;
             }
