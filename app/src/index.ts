@@ -14,7 +14,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
 const pathServer: Map<string, WsGamedata> = new Map();
 const client : DynamoDBClient = new DynamoDBClient({
     region: process.env.DYNAMOREGION as string,
@@ -206,12 +206,29 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
         // set up heartbeat
         const interval = setInterval(function ping() {
-            wss.clients.forEach(function each(ws) {
-              if (isAlive === false) return ws.terminate();
+            if(gamedataReference.status = Status.closing) {
+                return;
+            }
+
+            if(isAlive === false && uuid == gamedataReference.ownerUuid) {
+                wss.clients.forEach(function each(client) {
+                    client.send(`{\"response\":${WsResponse.closeSession}}`);
+                    client.close(1000, `Owner of the room has closed this session.`);
+                });
+                gamedataReference.status = Status.closing;
+                cleanup(path);
+                return;
+            }
+            else if(isAlive === false) return ws.terminate();
+
+            isAlive = false;
+            ws.ping();
+            // wss.clients.forEach(function each(ws) {
+            //   if (isAlive === false) return ws.terminate();
           
-              isAlive = false;
-              ws.ping();
-            });
+            //   isAlive = false;
+            //   ws.ping();
+            // });
           }, 30000);
 
 
@@ -460,8 +477,7 @@ function createGamedata(json: any, uuid: string): Gamedata {
 
     let gamedata = new Gamedata(name, ownerUuid, maxPlayers, isPrivate, gamemode);
     if (isPrivate) {
-        joinKey = json.joinKey;
-        gamedata.joinKey = joinKey;
+        gamedata.joinKey = randomStringCreator(10);
     }
     return gamedata;
 }
@@ -484,10 +500,7 @@ function updateGamedata(json: any, gamedata: Gamedata) {
     }
 
     if (gamedata.isPrivate) {
-        let joinKey: string = json.joinKey;
-        if (joinKey != undefined && joinKey != null) {
-            gamedata.joinKey = joinKey;
-        }
+        gamedata.joinKey = randomStringCreator(10);
     }
 }
 
@@ -506,4 +519,20 @@ function playerInformation(gamedata: Gamedata): string {
     }
 
     return JSON.stringify(new PlayerResponse(players));
+}
+
+/**
+ * Internal function used in generating a random string based off of an already existing charset.
+ * 
+ * @param length The number of characters that the function should output.
+ * @returns A randomly generated string of characters based on charset and the passed-in length.
+ */
+function randomStringCreator(length: number) {
+    let newString = '';
+
+    for (let i = 0; i < length; i++) {
+        newString += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+
+    return newString;
 }
