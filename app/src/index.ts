@@ -241,12 +241,14 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
         ws.on('close', function handleClose() {
             console.log('Closing session for ' + uuid);
+            clearInterval(interval);
             if(gamedataReference.status == Status.closing) {
+                console.log('Attempting to delete ' + uuid + " from the player list in " + path + ": This room is already in a closing state");
                 return;
             }
 
-            clearInterval(interval);
             if(uuid == gamedataReference.ownerUuid) {
+                console.log( uuid + " owns room " + path + " as it matches " + gamedataReference.ownerUuid + " and the room is automatically disbanded due to them leaving. Good night!");
                 wss.clients.forEach(function each(client) {
                     client.send(`{\"response\":${WsResponse.closeSession}}`);
                     client.close(1000, `Owner of the room has closed this session.`);
@@ -254,12 +256,14 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                 gamedataReference.status = Status.closing;
                 cleanup(path);
             } else {
+                console.log('Attempting to delete ' + uuid + "from the player list in " + path);
                 gamedataReference.players.delete(uuid);
-                updateDynamoTable(upgradePath);
+                updateDynamoTable(path);
             }
         })
 
         ws.on('pong', function heartbeat() {
+            console.log("Received pong event from " + uuid +  " for room " + path);
             isAlive = true;
         })
 
@@ -441,8 +445,10 @@ async function updateDynamoTable(key: string) {
 }
 
 async function cleanup(key: string) {
+    console.log("Started cleanup for room " + key);
     let compositeKey = pathServer.get(key)?.gamedata.isPrivate;
     if(compositeKey == undefined) {
+        console.log("Failed to validate privacy status of room " + key);
         return;
     }
 
