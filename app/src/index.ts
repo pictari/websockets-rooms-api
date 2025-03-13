@@ -206,17 +206,19 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
         // set up heartbeat
         const interval = setInterval(function ping() {
-            if(gamedataReference.status = Status.closing) {
+            if(gamedataReference.status == Status.closing) {
+                console.log("Ignoring heartbeat for " + uuid + ": room " + path + " is closing.");
                 return;
             }
 
             if(isAlive === false && uuid == gamedataReference.ownerUuid) {
+                console.log(`The owner ${uuid} is not responding to the heartbeat. Closing room ${path}.`);
+                gamedataReference.status = Status.closing;
+                cleanup(path);
                 wss.clients.forEach(function each(client) {
                     client.send(`{\"response\":${WsResponse.closeSession}}`);
                     client.close(1000, `Owner of the room has closed this session.`);
                 });
-                gamedataReference.status = Status.closing;
-                cleanup(path);
                 return;
             }
             else if(isAlive === false) return ws.terminate();
@@ -243,18 +245,18 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
             console.log('Closing session for ' + uuid);
             clearInterval(interval);
             if(gamedataReference.status == Status.closing) {
-                console.log('Attempting to delete ' + uuid + " from the player list in " + path + ": This room is already in a closing state");
+                console.log('Refused to delete ' + uuid + " from the player list in " + path + ": This room is already in a closing state");
                 return;
             }
 
             if(uuid == gamedataReference.ownerUuid) {
                 console.log( uuid + " owns room " + path + " as it matches " + gamedataReference.ownerUuid + " and the room is automatically disbanded due to them leaving. Good night!");
+                gamedataReference.status = Status.closing;
+                cleanup(path);
                 wss.clients.forEach(function each(client) {
                     client.send(`{\"response\":${WsResponse.closeSession}}`);
                     client.close(1000, `Owner of the room has closed this session.`);
                 });
-                gamedataReference.status = Status.closing;
-                cleanup(path);
             } else {
                 console.log('Attempting to delete ' + uuid + "from the player list in " + path);
                 gamedataReference.players.delete(uuid);
@@ -317,11 +319,11 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         }
 
                         gamedataReference.status = Status.closing;
+                        cleanup(path);
                         wss.clients.forEach(function each(client) {
                             client.send(`{\"response\":${WsResponse.closeSession}}`);
                             client.close(1000, `Owner of the room has closed this session.`);
                         });
-                        cleanup(path);
                         break;
                     case(WsCommand.ready):
                         gamedataReference.players.set(uuid, gamedataReference.players.get(uuid) ? ReadyStatus.pending : ReadyStatus.ready);
