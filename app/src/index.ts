@@ -114,19 +114,19 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
     let query = pathName.searchParams.get("token");
     if (query == null || query == undefined || query.length == 0) {
-        socket.destroy(new Error("No JWT supplied in the request."));
+        socket.destroy();
         return;
     }
 
     let decodedToken = verifyJWT(query);
 
     if (decodedToken == null || decodedToken == undefined) {
-        socket.destroy(new Error("JWT verification failed."));
+        socket.destroy();
         return;
     }
 
     if (decodedToken.verified == null || decodedToken.verified == 0) {
-        socket.destroy(new Error("Only verified users can join a game."));
+        socket.destroy();
         return;
     }
 
@@ -156,7 +156,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
     }
 
     if (!found) {
-        socket.destroy(new Error("Couldn't find a WebSockets server with that key."));
+        socket.destroy();
     }
 });
 
