@@ -228,8 +228,17 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
             }
 
             clearInterval(interval);
-            gamedataReference.players.delete(uuid);
-            updateDynamoTable(upgradePath);
+            if(uuid == gamedataReference.ownerUuid) {
+                wss.clients.forEach(function each(client) {
+                    client.send(`{\"response\":${WsResponse.closeSession}}`);
+                    client.close(1000, `Owner of the room has closed this session.`);
+                });
+                gamedataReference.status = Status.closing;
+                cleanup(path);
+            } else {
+                gamedataReference.players.delete(uuid);
+                updateDynamoTable(upgradePath);
+            }
         })
 
         ws.on('pong', function heartbeat() {
