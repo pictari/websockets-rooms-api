@@ -179,6 +179,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
         const gamedataReference = initialGamedata;
         const path = upgradePath;
         let isAlive = true;
+        let WTport = 0;
 
         // this shouldn't happen because this verification already happened on the UPGRADE request side, but just in case...
         // also to conform to strict type checking
@@ -309,8 +310,24 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             break;
                         }
 
+                        let validateReadiness: boolean = true;
+                        for(let player in gamedataReference.players.keys()) {
+                            if(gamedataReference.players.get(player) == ReadyStatus.pending) {
+                                validateReadiness = false;
+                                break;
+                            }
+                        }
+
+                        if(!validateReadiness) {
+                            ws.send(`{\"response\":${WsResponse.error}, \"message\":\"All players must be ready before starting a gameserver.\"}}`);
+                            break;
+                        }
+
                         //TODO: raise a gameserver here
                         gamedataReference.status = Status.ongoing;
+                        if(WTport != 0) {
+                            recordPort(WTport);
+                        }
                         break;
                     case (WsCommand.disband):
                         if(uuid != gamedataReference.ownerUuid) {
@@ -339,9 +356,16 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             break;
                         }
 
+                        clearPort(WTport);
+                        for(let player in gamedataReference.players.keys()) {
+                            gamedataReference.players.set(player, ReadyStatus.pending);
+                        }
+
+                        WTport = 0;
                         gamedataReference.status = Status.waiting;
                         wss.clients.forEach(function each(client) {
                             if (client.readyState === WebSocket.OPEN) {
+                                client.send(playerInformation(gamedataReference));
                                 client.send(settingsInformation(gamedataReference));
                             }
                         });
@@ -544,4 +568,43 @@ function randomStringCreator(length: number) {
     }
 
     return newString;
+}
+
+async function recordPort(port: number) {
+    console.log(`Entering port ${port} into DynamoDB`)
+    let input = {
+        "TableName": "gameserver-used-ports",
+        "Item": {
+            "Port": {
+                "N": String(port)
+            },
+            "Timestamp":{
+                "S":  `${new Date()}`
+            }
+        }
+    }
+
+    try {
+        await client.send(new PutItemCommand(input));
+    } catch(e) {
+        console.log(e);
+    }
+}
+
+async function clearPort(port: number) {
+    console.log(`Clearing port ${port} from DynamoDB`)
+    let input = {
+        "TableName": "gameserver-used-ports",
+        "Key": {
+            "Port": {
+                "N": String(port)
+            }
+        }
+    }
+
+    try {
+        await client.send(new DeleteItemCommand(input));
+    } catch(e) {
+        console.log(e);
+    }
 }
