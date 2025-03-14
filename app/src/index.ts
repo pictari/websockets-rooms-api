@@ -169,7 +169,7 @@ async function spinUpGameserver(allowedUUIDs: string): Promise<string> {
     // XXX: maybe factor this out into a global var? 
     // not sure if this is a good idea because of race conditions
     const kc = new k8s.KubeConfig();
-    kc.loadFromDefault();
+    kc.loadFromCluster();
     const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
     
     const jwtSecret = process.env.JWT_SECRET || '';
