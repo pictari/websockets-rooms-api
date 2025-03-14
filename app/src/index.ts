@@ -11,6 +11,8 @@ import { SettingsResponse } from './models/internal/json_objects/settingsRespons
 import { Player, ReadyStatus } from './models/internal/json_objects/player';
 import { PlayerResponse } from './models/internal/json_objects/playerResponse';
 import dotenv from "dotenv";
+import k8s from "@kubernetes/client-node";
+
 
 dotenv.config();
 
@@ -162,6 +164,87 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
 server.listen(8080);
 
+async function spinUpGameserver(allowedUUIDs: string): Promise<string> {
+    // Initialize Kubernetes client
+    // XXX: maybe factor this out into a global var? 
+    // not sure if this is a good idea because of race conditions
+    const kc = new k8s.KubeConfig();
+    kc.loadFromDefault();
+    const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+    
+    const jwtSecret = process.env.JWT_SECRET || '';
+
+    try {
+        // Fetch all pods in the pictari-gameservers namespace
+        const res = await k8sApi.listNamespacedPod({namespace: 'pictari-gameservers'});
+        const podNames = res.items.map(pod => pod.metadata!.name!);
+
+        // Extract used ports from pod names (e.g., "gameserver-7222" -> 7222)
+        const usedPorts = podNames
+            .filter(name => /^gameserver-\d+$/.test(name))
+            .map(name => parseInt(name.split('-')[1], 10));
+
+        // Define all possible ports in the range 7220 to 7230
+        const allPorts = Array.from({ length: 11 }, (_, i) => 7220 + i);
+
+        // Determine free ports
+        const freePorts = allPorts.filter(port => !usedPorts.includes(port));
+
+        // Check if there are any free ports available
+        if (freePorts.length === 0) {
+            throw new Error('No free ports available in the range 7220 to 7230');
+        }
+
+        // Select the first available port
+        const selectedPort = freePorts[0];
+
+        // Define the pod manifest based on the provided structure
+        const podManifest: k8s.V1Pod = {
+            apiVersion: 'v1',
+            kind: 'Pod',
+            metadata: {
+                name: `gameserver-${selectedPort}`,
+                namespace: 'pictari-gameservers',
+                labels: {
+                    app: `gameserver-${selectedPort}`
+                }
+            },
+            spec: {
+                containers: [
+                    {
+                        name: `gameserver-${selectedPort}`,
+                        image: '905418467919.dkr.ecr.eu-west-1.amazonaws.com/pictari-gameserver:latest',
+                        ports: [
+                            {
+                                containerPort: selectedPort,
+                                protocol: 'UDP'
+                            }
+                        ],
+                        env: [
+                            {
+                                name: 'JWT_SECRET',
+                                value: jwtSecret
+                            },
+                            {
+                                name: 'ALLOWED_UUIDS',
+                                value: allowedUUIDs
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        // Create the new pod
+        await k8sApi.createNamespacedPod({namespace: 'pictari-gameservers', body: podManifest});
+
+        // Return the address with the selected port
+        return `https://gameserver.pictari.app:${selectedPort}`;
+    } catch (error) {
+        console.error('Error creating game server:', error);
+        throw error;
+    }
+}
 
 function raiseNewWSServer(initialGamedata: Gamedata) {
     // is it excessive to use UUIDs for server names
@@ -324,6 +407,16 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         }
 
                         //TODO: raise a gameserver here
+                        try {
+                            const allowedUUIDs = Array.from(gamedataReference.players.keys()).join(',');
+                            spinUpGameserver(allowedUUIDs).then((server_address) => {
+                                // im not sure what's the format of the message?
+                            });
+                        } catch (error) {
+                            // send an error message to the client
+                            // again im not sure what format are you using XD
+                        }
+
                         gamedataReference.status = Status.ongoing;
                         if(WTport != 0) {
                             recordPort(WTport);
