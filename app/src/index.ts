@@ -238,6 +238,17 @@ async function spinUpGameserver(allowedUUIDs: string): Promise<string> {
         // Create the new pod
         await k8sApi.createNamespacedPod({namespace: 'pictari-gameservers', body: podManifest});
 
+        // Wait for the pod to be ready
+        console.log('Waiting for pod to be ready...');
+        let podReady = false;
+        while (!podReady) {
+            const pod = await k8sApi.readNamespacedPod({ namespace: 'pictari-gameservers', name: `gameserver-${selectedPort}` });
+            podReady = pod.status?.phase === 'Running' && pod.status?.containerStatuses?.[0]?.ready === true;
+            if (!podReady) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
         // Return the address with the selected port
         return `https://gameserver.pictari.app:${selectedPort}`;
     } catch (error) {
