@@ -406,15 +406,15 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             break;
                         }
 
-                        try {
-                            const allowedUUIDs = Array.from(gamedataReference.players.keys()).join(',');
-                            spinUpGameserver(allowedUUIDs).then((server_address) => {
-                                ws.send(`{\"response\":${WsResponse.gameServerDetails}, \"message\":\"${server_address}\"}}`);
-                            });
-                        } catch (error) {
+                        const allowedUUIDs = Array.from(gamedataReference.players.keys()).join(',');
+                        spinUpGameserver(allowedUUIDs).then((server_address) => {
+                            ws.send(`{\"response\":${WsResponse.gameServerDetails}, \"message\":\"${server_address}\"}}`);
+                            gamedataReference.status = Status.ongoing;
+                        })
+                        .catch((error) => {
                             ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Failed to start a gameserver. Try again.\"}}`);
                             console.error("Failed to start a gameserver: ", error);
-                        }
+                        });
 
                         gamedataReference.status = Status.ongoing;
                         if(WTport != 0) {
