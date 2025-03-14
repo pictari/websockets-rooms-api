@@ -5,25 +5,23 @@ metadata:
   namespace: pictari-web
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: gameserver-manager-role
-  namespace: pictari-gameservers
+  name: gameserver-manager-cluster-role
 rules:
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["list", "create"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: gameserver-manager-binding
-  namespace: pictari-gameservers
+  name: gameserver-manager-cluster-binding
 subjects:
 - kind: ServiceAccount
   name: gameserver-manager
   namespace: pictari-web
 roleRef:
-  kind: Role
-  name: gameserver-manager-role
+  kind: ClusterRole
+  name: gameserver-manager-cluster-role
   apiGroup: rbac.authorization.k8s.io
