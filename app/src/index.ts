@@ -172,7 +172,7 @@ async function spinUpGameserver(allowedUUIDs: string): Promise<string> {
     kc.loadFromCluster();
     const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
     
-    const jwtSecret = process.env.JWT_SECRET || '';
+    const jwtSecret = process.env.JWTSECRET || '';
 
     try {
         // Fetch all pods in the pictari-gameservers namespace
