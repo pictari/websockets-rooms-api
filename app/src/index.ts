@@ -406,15 +406,14 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                             break;
                         }
 
-                        //TODO: raise a gameserver here
                         try {
                             const allowedUUIDs = Array.from(gamedataReference.players.keys()).join(',');
                             spinUpGameserver(allowedUUIDs).then((server_address) => {
-                                // im not sure what's the format of the message?
+                                ws.send(`{\"response\":${WsResponse.gameServerDetails}, \"message\":\"${server_address}\"}}`);
                             });
                         } catch (error) {
-                            // send an error message to the client
-                            // again im not sure what format are you using XD
+                            ws.send(`{\"response\":${WsResponse.error}, \"message\":\"Failed to start a gameserver. Try again.\"}}`);
+                            console.error("Failed to start a gameserver: ", error);
                         }
 
                         gamedataReference.status = Status.ongoing;
