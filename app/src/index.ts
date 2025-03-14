@@ -419,7 +419,10 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
 
                         const allowedUUIDs = Array.from(gamedataReference.players.keys()).join(',');
                         spinUpGameserver(allowedUUIDs).then((server_address) => {
-                            ws.send(`{\"response\":${WsResponse.gameServerDetails}, \"message\":\"${server_address}\"}`);
+                            wss.clients.forEach(function each(client) {
+                                if (client.readyState === WebSocket.OPEN)
+                                    client.send(`{\"response\":${WsResponse.gameServerDetails}, \"message\":\"${server_address}\"}`);
+                            });
                             gamedataReference.status = Status.ongoing;
                         })
                         .catch((error) => {
