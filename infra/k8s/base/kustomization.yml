@@ -5,6 +5,7 @@ resources:
   - deployment.yml
   - service.yml
   - ingress.yml
+  - rbac.yml
 
 configMapGenerator:
   - name: logging-defaults

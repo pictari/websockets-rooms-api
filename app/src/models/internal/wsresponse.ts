@@ -3,5 +3,6 @@ export enum WsResponse {
     chat,
     settingsUpdate,
     playersUpdate,
-    closeSession
+    closeSession,
+    gameServerDetails
 }

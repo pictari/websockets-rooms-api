@@ -22,6 +22,7 @@ spec:
       annotations:
         update-trigger: "1"
     spec:
+      serviceAccountName: gameserver-manager
       containers:
         - name: rooms-api
           image: "${IMAGE_TAG}"
