@@ -210,6 +210,7 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
                 }
             },
             spec: {
+                restartPolicy: 'Never',
                 containers: [
                     {
                         name: `gameserver-${selectedPort}`,
