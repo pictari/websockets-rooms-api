@@ -164,7 +164,7 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
 server.listen(8080);
 
-async function spinUpGameserver(allowedUUIDs: string): Promise<string> {
+async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promise<string> {
     // Initialize Kubernetes client
     // XXX: maybe factor this out into a global var? 
     // not sure if this is a good idea because of race conditions
@@ -228,6 +228,10 @@ async function spinUpGameserver(allowedUUIDs: string): Promise<string> {
                             {
                                 name: 'ALLOWED_UUIDS',
                                 value: allowedUUIDs
+                            },
+                            {
+                                name: 'OWNER_UUID',
+                                value: ownerUUID
                             }
                         ]
                     }
@@ -418,7 +422,7 @@ function raiseNewWSServer(initialGamedata: Gamedata) {
                         }
 
                         const allowedUUIDs = Array.from(gamedataReference.players.keys()).join(',');
-                        spinUpGameserver(allowedUUIDs).then((server_address) => {
+                        spinUpGameserver(allowedUUIDs, gamedataReference.ownerUuid).then((server_address) => {
                             wss.clients.forEach(function each(client) {
                                 if (client.readyState === WebSocket.OPEN)
                                     client.send(`{\"response\":${WsResponse.gameServerDetails}, \"message\":\"${server_address}\"}`);
