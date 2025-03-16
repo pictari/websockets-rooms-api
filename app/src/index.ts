@@ -177,7 +177,7 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
     try {
         // Fetch all pods in the pictari-gameservers namespace
         const res = await k8sApi.listNamespacedPod({namespace: 'pictari-gameservers'});
-        const podNames = res.items.filter(i => i.status?.phase === 'Running').map(pod => pod.metadata!.name!);
+        const podNames = res.items.map(pod => pod.metadata!.name!);
 
         // Extract used ports from pod names (e.g., "gameserver-7222" -> 7222)
         const usedPorts = podNames
