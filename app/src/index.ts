@@ -214,7 +214,7 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
                 name: podName,
                 namespace: 'pictari-gameservers',
                 labels: {
-                    app: podName,
+                    app: `gameserver-${selectedPort}`,
                     port: `${selectedPort}`
                 }
             },
