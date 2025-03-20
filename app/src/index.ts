@@ -166,8 +166,6 @@ server.listen(8080);
 
 async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promise<string> {
     // Initialize Kubernetes client
-    // XXX: maybe factor this out into a global var? 
-    // not sure if this is a good idea because of race conditions
     const kc = new k8s.KubeConfig();
     kc.loadFromCluster();
     const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
@@ -175,14 +173,21 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
     const jwtSecret = process.env.JWTSECRET || '';
 
     try {
+        // Generate a random suffix for the pod name
+        const randomSuffix = Math.random().toString(36).substring(2, 10);
+        
         // Fetch all pods in the pictari-gameservers namespace
         const res = await k8sApi.listNamespacedPod({namespace: 'pictari-gameservers'});
-        const podNames = res.items.map(pod => pod.metadata!.name!);
-
-        // Extract used ports from pod names (e.g., "gameserver-7222" -> 7222)
-        const usedPorts = podNames
-            .filter(name => /^gameserver-\d+$/.test(name))
-            .map(name => parseInt(name.split('-')[1], 10));
+        const runningPods = res.items.filter(pod => pod.status?.phase === 'Running');
+        
+        // Extract used ports from running pod names (e.g., "gameserver-7222-abc123" -> 7222)
+        const usedPorts = runningPods
+            .map(pod => {
+                const name = pod.metadata!.name!;
+                const match = name.match(/^gameserver-(\d+)-[a-z0-9]+$/);
+                return match ? parseInt(match[1], 10) : null;
+            })
+            .filter((port): port is number => port !== null);
 
         // Define all possible ports in the range 7220 to 7230
         const allPorts = Array.from({ length: 11 }, (_, i) => 7220 + i);
@@ -197,23 +202,27 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
 
         // Select the first available port
         const selectedPort = freePorts[0];
+        
+        // Create a unique pod name with the port and random suffix
+        const podName = `gameserver-${selectedPort}-${randomSuffix}`;
 
         // Define the pod manifest based on the provided structure
         const podManifest: k8s.V1Pod = {
             apiVersion: 'v1',
             kind: 'Pod',
             metadata: {
-                name: `gameserver-${selectedPort}`,
+                name: podName,
                 namespace: 'pictari-gameservers',
                 labels: {
-                    app: `gameserver-${selectedPort}`
+                    app: podName,
+                    port: `${selectedPort}`
                 }
             },
             spec: {
                 restartPolicy: 'Never',
                 containers: [
                     {
-                        name: `gameserver-${selectedPort}`,
+                        name: `gameserver-container`,
                         image: '905418467919.dkr.ecr.eu-west-1.amazonaws.com/pictari-gameserver:latest',
                         ports: [
                             {
@@ -233,25 +242,49 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
                             {
                                 name: 'OWNER_UUID',
                                 value: ownerUUID
+                            },
+                            {
+                                name: 'PORT',
+                                value: `${selectedPort}`
                             }
                         ]
                     }
                 ]
-            }
+            },
         };
 
         // Create the new pod
         await k8sApi.createNamespacedPod({namespace: 'pictari-gameservers', body: podManifest});
 
         // Wait for the pod to be ready
-        console.log('Waiting for pod to be ready...');
+        console.log(`Waiting for pod ${podName} to be ready...`);
         let podReady = false;
-        while (!podReady) {
-            const pod = await k8sApi.readNamespacedPod({ namespace: 'pictari-gameservers', name: `gameserver-${selectedPort}` });
-            podReady = pod.status?.phase === 'Running' && pod.status?.containerStatuses?.[0]?.ready === true;
-            if (!podReady) {
+        let retryCount = 0;
+        const maxRetries = 30; // 1 minute timeout (30 * 2 seconds)
+        
+        while (!podReady && retryCount < maxRetries) {
+            try {
+                const pod = await k8sApi.readNamespacedPod({ 
+                    namespace: 'pictari-gameservers', 
+                    name: podName 
+                });
+                
+                podReady = pod.status?.phase === 'Running' && 
+                           pod.status?.containerStatuses?.[0]?.ready === true;
+                
+                if (!podReady) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    retryCount++;
+                }
+            } catch (error) {
+                console.error(`Error checking pod status: ${error}`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
+                retryCount++;
             }
+        }
+
+        if (!podReady) {
+            throw new Error(`Pod ${podName} failed to reach ready state within timeout period`);
         }
 
         // Return the address with the selected port
