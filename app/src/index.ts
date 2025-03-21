@@ -223,7 +223,7 @@ async function spinUpGameserver(allowedUUIDs: string, ownerUUID: string): Promis
                 containers: [
                     {
                         name: `gameserver-container`,
-                        image: '905418467919.dkr.ecr.eu-west-1.amazonaws.com/pictari-gameserver:latest',
+                        image: '905418467919.dkr.ecr.eu-west-1.amazonaws.com/pictari-gameserver@sha256:509119ab8f34abb296ff180b97313a3cf12feea7e48606fd730d2f159a9d575f',
                         ports: [
                             {
                                 containerPort: selectedPort,
